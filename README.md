@@ -1,1 +1,0 @@
-# Viril-self-developement
