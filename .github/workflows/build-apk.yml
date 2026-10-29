@@ -3,6 +3,12 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - index.html
+      - .github/workflows/build-apk.yml
 
 permissions:
   contents: read
@@ -10,11 +16,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout latest code
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -25,10 +32,21 @@ jobs:
           distribution: temurin
           java-version: 21
 
+      - name: Verify source HTML
+        run: |
+          set -e
+          test -s index.html
+          echo "Commit: $GITHUB_SHA"
+          echo "Source HTML:"
+          sha256sum index.html
+          grep -o -m 1 '<title>[^<]*</title>' index.html || true
+
       - name: Prepare game
         run: |
+          set -e
           mkdir -p www
           cp index.html www/index.html
+          cmp index.html www/index.html
           npm init -y
 
       - name: Install Capacitor
@@ -46,20 +64,40 @@ jobs:
           }
           EOF
 
-      - name: Add Android
+      - name: Add Android platform
         run: npx cap add android
+
+      - name: Sync latest HTML to Android
+        run: |
+          set -e
+          npx cap sync android
+          test -s android/app/src/main/assets/public/index.html
+          echo "HTML included in Android:"
+          sha256sum android/app/src/main/assets/public/index.html
+          cmp www/index.html android/app/src/main/assets/public/index.html
 
       - name: Build APK
         run: |
-          npx cap sync android
+          set -e
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew --no-build-cache clean assembleDebug
+
+      - name: Prepare APK artifact
+        run: |
+          set -e
+          mkdir -p dist
+          cp android/app/build/outputs/apk/debug/app-debug.apk dist/Viril.apk
+          test -s dist/Viril.apk
+          echo "APK size:"
+          ls -lh dist/Viril.apk
+          echo "APK SHA256:"
+          sha256sum dist/Viril.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: viril-game-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: Viril-Android-APK
+          path: dist/Viril.apk
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 14
